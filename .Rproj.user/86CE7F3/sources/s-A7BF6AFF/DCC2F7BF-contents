@@ -1,0 +1,172 @@
+###################################################################
+setwd("~/Dropbox/MDS_Code/MovielensData/ml-100k")
+udata = read.csv("u.data", header = FALSE, sep = "")
+Y = matrix(0,943,1682)
+Omega = matrix(1,943,1682) 
+for(i in 1:943){Y[i,udata[(udata[,1] == i),2]] = 1}
+rate = vector();for(i in 1:1682){rate[i] = sum(udata[ (udata[,2]==i),3 ])/(length(udata[ (udata[,2]==i),  3 ]))}
+uitem = read.csv("u.item", header = FALSE, sep = "|")
+release_year = as.numeric(substr(as.character(uitem[,3]),8,11))
+release_month = match(substr(as.character(uitem[,3]),4,6),month.abb)
+release_date = as.numeric(substr(as.character(uitem[,3]),1,2))
+release_date[1373]=4
+release = release_year*365+release_month*30+release_date
+
+########the 267th movie are NA!
+
+
+num_people = apply(Y,2,sum)
+user = read.csv("u.user", header = FALSE, sep = "|")
+
+day = (udata$V4/(3600*24)-10123)
+time_movie = rep(0,1682);for(i in 1:1682){time_movie[i] = median(  day[(udata[,2]==i)]  )}#/length(day[(udata[,2]==i)])}
+time_people = rep(0,943);for(i in 1:943){time_people[i] = median(  day[(udata[,1]==i)]  )}#/length(day[(udata[,1]==i)])}
+
+movie_select = which(apply(Y,2,sum)>=100)
+Y_select = Y[,movie_select]
+Omega_select = Omega[,movie_select]
+rate_select = rate[movie_select]
+uitem_select = uitem[movie_select,]
+release_select = release[movie_select]
+release_year_select = release_year[movie_select]
+type_select = list();for(i in 1:19){type_select[[i]] = which(uitem_select[,i+5]>=1)}
+job_name = names(table(user$V4));occupy = list(); for(i in 1:21){occupy[[i]] = which(user$V4 == job_name[i]) }
+num_people_select = num_people[movie_select]
+time_movie_select = time_movie[movie_select]
+
+N = 943
+J = length(movie_select)
+###################################################################################
+
+setwd("~/Dropbox/MDS_Code/最新模型代码/movie/results")
+
+LL = rep(0,100)
+for(i in 1:100){load(paste("",i,"ll.Rdata"));LL[i] = ll}
+
+load(paste("",which.max(LL),"Theta.Rdata"))
+load(paste("",which.max(LL),"A.Rdata"))
+
+# angle = -25*pi/180
+# rotation = matrix(c( cos(angle),sin(angle),-sin(angle),cos(angle) ),2,2)
+# 
+# A = A %*% t(rotation)
+# Theta = Theta %*% t(rotation)
+
+# AT = rbind(A,Theta)
+# ATP = princomp(AT)
+# A = ATP$scores[1:338,]
+# Theta = ATP$scores[339:(338+943),]
+
+
+AP = princomp(A)
+A = AP$scores
+Theta = (Theta - rep(1,N)%*%t(AP$center))%*%AP$loadings
+
+
+
+
+##############item
+type_col = rep(1,J)
+
+type_1 = c(type_select[[2]],type_select[[3]],type_select[[7]])
+type_2 = c(type_select[[13]],type_select[[15]])
+type_3 = c(type_select[[10]],type_select[[16]])
+
+type_col[type_select[[8]]]=2
+
+num_people_col = rep(1,J)
+num_people_col[which((num_people_select>=100)&(num_people_select<=quantile(num_people_select,0.25)))] = 1
+num_people_col[which((num_people_select>quantile(num_people_select,0.25))&(num_people_select<=quantile(num_people_select,0.5)))] = 2
+num_people_col[which((num_people_select>quantile(num_people_select,0.5))&(num_people_select<=quantile(num_people_select,0.75)))] = 3
+num_people_col[which(num_people_select>quantile(num_people_select,0.75))] = 4
+
+release_col = rep(1,J)
+release_col[which((release_year_select==1997)|(release_year_select==1998))] = 3
+release_col[which((release_year_select==1995)|(release_year_select==1996))] = 2
+release_col[which(release_year_select<=1994)] = 1
+# release_col[which((release_select>quantile(release_select,0.2))&((release_select<=quantile(release_select,0.4))))]=2
+# release_col[which((release_select>quantile(release_select,0.4))&((release_select<=quantile(release_select,0.6))))]=3
+# release_col[which((release_select>quantile(release_select,0.6))&((release_select<=quantile(release_select,0.8))))]=4
+# release_col[which(release_select>quantile(release_select,0.6))]=5
+
+
+
+##############individual
+num_movies_select = apply(Y_select,1,sum)
+
+num_movies_col = rep(1,N)
+num_movies_col[which(num_movies_select<=quantile(num_movies_select,0.25))] = 1
+num_movies_col[which((num_movies_select>quantile(num_movies_select,0.25))&(num_movies_select<=quantile(num_movies_select,0.5)))] = 2
+num_movies_col[which((num_movies_select>quantile(num_movies_select,0.5))&(num_movies_select<=quantile(num_movies_select,0.75)))] = 3
+num_movies_col[which(num_movies_select>quantile(num_movies_select,0.75))] = 4
+
+age_col = rep(1,N)
+age_col[which(user[,2]<=20)]=2
+
+gender_col = rep(1,N) 
+gender_col[which(user[,3]=="M")] = 2
+
+occupy_col = rep(1,N)
+type_1 = c(occupy[[9]],occupy[[13]])
+type_2 = c(occupy[[2]],occupy[[21]])
+type_3 = c(occupy[[5]])
+type_4 = c(occupy[[3]],occupy[[10]])
+
+occupy_col[type_3] = 2
+
+###########################################plot
+#setwd("~/Dropbox/MDS/MDS/figure")
+setwd("~/Dropbox/MDS/MDS/InBiometrikaForm/biometrika2017/figure")
+
+# pdf("whole.pdf",width = 5, height = 5, useDingbats	= FALSE)
+plot(Theta[,1],Theta[,2], col = grey(0.2),pch = 2,xlim = c(-3.5,4), ylim = c(-3,1.5), ann = FALSE)
+points(A[,1],A[,2],col = 2, pch = 1)
+legend(2,1.2,c("movie","user"), col = c(2,1), pch = c(1,2))
+# dev.off()
+
+# pdf("movie_x.pdf",width = 5, height = 5, useDingbats	= FALSE)
+plot(A[,1],A[,2],col = num_people_col, pch = num_people_col+3, xlim = c(-2,3), ylim = c(-1,1.5), ann = FALSE)
+points(A[17,1],A[17,2],col = 7,pch = 15)
+points(A[2,1],A[2,2],col = 7, pch = 15)
+points(A[3,1],A[3,2],col = 7, pch = 15)
+points(A[69,1],A[69,2],col = 7, pch = 15)
+legend(1.5,1.5,c("<=127","128-169","170-229",">=230","examples"), col = c(1,2,3,4,7), pch = c(4,5,6,7,15))
+# dev.off()
+
+
+
+# pdf("movie_y.pdf",width = 5, height = 5, useDingbats	= FALSE)
+plot(A[,1],A[,2],col = release_col, pch = release_col+3, xlim = c(-2,3), ylim = c(-1,1.5), ann = FALSE)
+points(A[73,1],A[73,2],col = 6, pch =15)
+points(A[4,1],A[4,2],col = 6, pch =15)
+points(A[157,1],A[157,2],col = 6, pch =15)
+legend(1,1.4,c("1997-1998","1995-1996","before 1995","examples"), col = c(3,2,1,6), pch = c(6,5,4,15))
+# dev.off()
+
+# pdf("movie_rate.pdf",width = 5, height = 5, useDingbats	= FALSE)
+plot(A[,1],A[,2],col = rate_select, pch = rate_select+2, xlim = c(-2,2.5), ylim = c(-1.5,1.5), ann = FALSE)
+legend(1.5,1.25,c("2-3","3-4","4-5"), col = c(2,3,4), pch = c(4,5,6))
+# dev.off()
+
+######
+
+# pdf("people_x.pdf",width = 5, height = 5, useDingbats	= FALSE)
+plot(Theta[,1],Theta[,2],col = num_movies_col, pch = num_movies_col+3, xlim = c(-4,2), ylim = c(-2.5,1), ann = FALSE)
+legend(-4,1,c("<=24","25-47","48-103",">=104"), col = c(1,2,3,4), pch = c(4,5,6,7))
+# dev.off()
+
+# pdf("people_y.pdf",width = 5, height = 5, useDingbats	= FALSE)
+plot(Theta[,1],Theta[,2],col = 1, pch = 2, xlim = c(-3,5), ylim = c(-2.25,1), ann = FALSE)
+points(A[,1],A[,2],col = release_col+1, pch = release_col+2)
+legend(2,-0.75,c("user","before 1995","1995-1996","1997-1998"), col = c(1,2,3,4), pch = c(2,3,4,5))
+# dev.off()
+
+
+##################################################################hypothesis test
+cor.test(Theta[,2],num_movies_select,method = "kendall")
+cor.test(A[,1],release_select,method = "kendall")
+cor.test(A[,1],release_year_select,method = "kendall")
+
+
+chisq.test(as.numeric(release_select<1995),as.numeric(rate_select>=4))
+chisq.test(as.numeric(release_select<1995),as.numeric(rate_select<3))

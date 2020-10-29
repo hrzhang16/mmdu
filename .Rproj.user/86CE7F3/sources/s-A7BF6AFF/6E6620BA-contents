@@ -1,0 +1,274 @@
+// [[Rcpp::depends(RcppArmadillo)]]
+#include <RcppArmadillo.h>
+using namespace arma;
+
+//[[Rcpp::export]]
+mat sign(mat D) {
+  
+  int N = D.n_rows, J = D.n_cols;
+  for(int i = 0; i < N; i++) {
+    for(int j = 0; j < J; j++) {
+      
+      if(D(i,j) < 0) D(i,j) = 0; 
+    }
+  }
+  return D;  
+}
+
+//[[Rcpp::export]]
+mat dist_partial(const mat& Theta, 
+                 const mat& A) { 
+  
+  int N = Theta.n_rows, J = A.n_rows, K = A.n_cols;
+  mat temp_1 = mat(K,J,fill::ones), temp_2 = mat(N,K,fill::ones);
+  mat temp_3 = (Theta%Theta)*temp_1 - 2*Theta*(A.t()) + temp_2*((A%A).t());
+  return sign(temp_3);
+}
+
+//[[Rcpp::export]]
+double ll_rcpp(const mat& Theta,
+               const mat& A, 
+               const mat& Y, 
+               const mat& Omega, 
+               const double& delta) {
+  
+  mat temp = exp(dist_partial(Theta, A)+delta);
+  return accu(( Omega % ((1-Y)%log(temp-1)-log(temp+1)))); 
+}
+
+//[[Rcpp::export]]
+double lt_rcpp(rowvec theta, 
+               const mat& A, 
+               rowvec y, // y is the ith row of response Y
+               rowvec omega, // omega is the ith row of Omega
+               const double& delta) {
+  
+  rowvec temp = exp(dist_partial(theta, A)+delta);
+  return accu(omega%((1-y)%log(temp-1)-log(temp+1)));
+}
+
+//[[Rcpp::export]]
+double la_rcpp(rowvec a,
+               const mat& Theta,
+               rowvec y, // y is the jth column of response Y
+               rowvec omega, // omega is the jth column of Omega 
+               const double& delta) {
+  
+  rowvec temp = exp(dist_partial(a,Theta)+delta);
+  return accu(omega%((1-y)%log(temp-1)-log(1+temp))); 
+}
+
+//[[Rcpp::export]]
+rowvec d_lt_rcpp(rowvec theta, 
+                 const mat& A, 
+                 rowvec y, // y is the ith row of response Y
+                 rowvec omega, // omega is the ith row of Omega
+                 const double& delta) {
+  
+  rowvec temp_1 = exp(dist_partial(theta,A)+delta);
+  int J = A.n_rows; 
+  mat temp_2 = ones<vec>(J) * theta - A;
+  
+  rowvec d_lt = (omega % ((-4*temp_1/(1+temp_1)) % (y/2-(1-y)/(temp_1-1)))) * temp_2;
+  double len = norm(d_lt,2);
+  if( (len == 0) || (len != len) ) {d_lt.fill(1/(sqrt(A.n_cols)));}
+  else {d_lt = d_lt/len;}
+  return d_lt;
+}
+
+//[[Rcpp::export]]
+rowvec d_la_rcpp(rowvec a,
+                 const mat& Theta,
+                 rowvec y, // y is the jth column of response Y
+                 rowvec omega, // omega is the jth column of Omega 
+                 const double& delta) {
+  
+  rowvec temp_1 = exp(dist_partial(a,Theta)+delta);
+  int N = Theta.n_rows;
+  mat temp_2 = ones<vec>(N) * a - Theta;
+  
+  rowvec d_la = (omega % ((-4*temp_1/(1+temp_1)) % (y/2-(1-y)/(temp_1-1)))) * temp_2;
+  double len = norm(d_la,2);
+  if( (len == 0) || (len != len) ) {d_la.fill(1/(sqrt(Theta.n_cols)));}
+  else {d_la = d_la/len;}
+  return d_la;
+}
+
+//[[Rcpp::export]]
+double eta_t_rcpp(double eta,
+                  rowvec Dt,
+                  rowvec theta,
+                  const mat& A,
+                  rowvec y, // y is the ith row of response Y
+                  rowvec omega, // omega is the ith row of Omega
+                  const double& delta) {
+  
+  double temp_1 = lt_rcpp(theta,A,y,omega,delta);
+  double temp_2 = lt_rcpp(theta+eta*Dt,A,y,omega,delta);
+  
+  while(temp_2 < temp_1) {
+    
+    eta = eta/2;
+    temp_2 = lt_rcpp(theta+eta*Dt,A,y,omega,delta);
+  }
+  return eta;
+}
+
+//[[Rcpp::export]]
+double eta_a_rcpp(double eta,
+                  rowvec Da,
+                  rowvec a,
+                  const mat& Theta,
+                  rowvec y, // y is the jth column of response Y
+                  rowvec omega, // omega is the jth column of Omega 
+                  const double& delta) {
+  
+  double temp_1 = la_rcpp(a,Theta,y,omega,delta);
+  double temp_2 = la_rcpp(a+eta*Da,Theta,y,omega,delta);
+  
+  while(temp_2 < temp_1) {
+    
+    eta = eta/2;
+    temp_2 = la_rcpp(a+eta*Da,Theta,y,omega,delta);
+  }
+  return eta;
+}
+
+//[[Rcpp::export]]
+rowvec project_rcpp(rowvec a,
+                    const double& C) {
+  
+  if(norm(a,2) <= C) {return a;}
+  else {return (C/norm(a,2))*a;}
+}
+
+//[[Rcpp::export]]
+int update_t_rcpp(mat& Theta,
+                  const mat& A,
+                  const mat& Y,
+                  const mat& Omega,
+                  const double& delta,
+                  const double& C) {
+  
+  int N = Theta.n_rows;
+  rowvec Dt; 
+  double eta; 
+  rowvec theta, y, omega;
+  
+  for(int i = 0; i < N; ++i) {
+    
+    theta = Theta.row(i), y = Y.row(i), omega = Omega.row(i);
+    Dt = d_lt_rcpp(theta, A, y, omega, delta);
+    //cout << max(abs(Dt)) << " ";
+    eta = eta_t_rcpp(1, Dt, theta, A, y, omega, delta);
+    //cout << eta;
+    Theta.row(i) =  project_rcpp(theta+eta*Dt, C);
+  }
+  //cout << ll_rcpp(Theta,A,Y,Omega,delta) << " ";
+  return 1;
+}
+
+//[[Rcpp::export]]
+int update_a_rcpp(mat& A,
+                  const mat& Theta,
+                  const mat& Y,
+                  const mat& Omega,
+                  const double& delta,
+                  const double& C) {
+  
+  int J = A.n_rows;
+  rowvec Da; 
+  double eta; 
+  rowvec a, y, omega;
+  
+  for(int j = 0; j < J; ++j) {
+    
+    a = A.row(j), y = Y.col(j).t(), omega = Omega.col(j).t();
+    Da = d_la_rcpp(a, Theta, y, omega, delta);
+    eta = eta_a_rcpp(1, Da, a, Theta, y, omega, delta);
+    A.row(j) =  project_rcpp(a+eta*Da, C);
+  }
+  
+  return 1;
+}
+
+//[[Rcpp::export]]
+int main_rcpp(mat& Theta,
+              mat& A,
+              const mat& Y,
+              const mat& Omega,
+              const double& delta,
+              const double& C,
+              const double& eps) {
+  
+  double ll_1 = ll_rcpp(Theta, A, Y, Omega, delta);
+  update_t_rcpp(Theta, A, Y, Omega, delta, C);
+  double ll_2 = ll_rcpp(Theta, A, Y, Omega, delta);
+  double s = ll_2-ll_1;
+  
+  while( abs(s) > eps ) {
+    
+    ll_1 = ll_2;
+    update_t_rcpp(Theta, A, Y, Omega, delta, C);
+    update_a_rcpp(A, Theta, Y, Omega, delta, C);
+    //cout << min(A);
+    ll_2 = ll_rcpp(Theta, A, Y, Omega, delta);
+    s = ll_2 - ll_1;
+    cout << s << " ";
+  }
+  
+  return s;
+}
+
+//[[Rcpp::export]]
+int main_partial_t_rcpp(mat& Theta,
+                        const mat& A,
+                        const mat& Y,
+                        const mat& Omega,
+                        const double& delta,
+                        const double& C,
+                        const double& eps) {
+  
+  double ll_1 = ll_rcpp(Theta, A, Y, Omega, delta);
+  update_t_rcpp(Theta, A, Y, Omega, delta, C);
+  double ll_2 = ll_rcpp(Theta, A, Y, Omega, delta);
+  double s = ll_2-ll_1;
+  
+  while( abs(s) > eps ) {
+    
+    ll_1 = ll_2;
+    update_t_rcpp(Theta, A, Y, Omega, delta, C);
+    ll_2 = ll_rcpp(Theta, A, Y, Omega, delta);
+    s = ll_2 - ll_1;
+    cout << s << " ";
+  }
+  return s;
+}
+
+//[[Rcpp::export]]
+int main_partial_a_rcpp(mat& A,
+                        const mat& Theta,
+                        const mat& Y,
+                        const mat& Omega,
+                        const double& delta,
+                        const double& C,
+                        const double& eps) {
+  
+  double ll_1 = ll_rcpp(Theta, A, Y, Omega, delta);
+  update_a_rcpp(A, Theta, Y, Omega, delta, C);
+  double ll_2 = ll_rcpp(Theta, A, Y, Omega, delta);
+  double s = ll_2-ll_1;
+  
+  while( abs(s) > eps ) {
+    
+    ll_1 = ll_2;
+    update_a_rcpp(A, Theta, Y, Omega, delta, C);
+    ll_2 = ll_rcpp(Theta, A, Y, Omega, delta);
+    s = ll_2 - ll_1;
+    cout << s << " ";
+  }
+  return s;
+}
+
+
+

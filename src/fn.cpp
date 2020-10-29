@@ -1,0 +1,164 @@
+// [[Rcpp::depends(RcppArmadillo)]]
+#include <RcppArmadillo.h>
+using namespace arma;
+
+//[[Rcpp::export]]
+arma::mat sign(arma::mat D) {
+
+  int N = D.n_rows, J = D.n_cols;
+  for(int i = 0; i < N; i++) {
+    for(int j = 0; j < J; j++) {
+
+      if(D(i,j) < 0) D(i,j) = 0;
+    }
+  }
+  return D;
+}
+
+//[[Rcpp::export]]
+arma::mat dist_partial(const arma::mat& Theta, const arma::mat& A) {
+
+  int N = Theta.n_rows, J = A.n_rows, K = A.n_cols;
+  arma::mat temp_1 = arma::mat(K,J,fill::ones), temp_2 = arma::mat(N,K,fill::ones);
+  arma::mat temp_3 = (Theta%Theta)*temp_1 - 2*Theta*(A.t()) + temp_2*((A%A).t());
+  return sign(temp_3);
+}
+
+//[[Rcpp::export]]
+double project_double(double x, double C) {
+
+  if(abs(x) <= C) return x;
+  else if(x > C) return C;
+  else return -C;
+
+}
+
+//[[Rcpp::export]]
+arma::rowvec project_vec(arma::rowvec a, double C) {
+
+  if(norm(a,2) <= C) {return a;}
+  else {return (C/norm(a,2))*a;}
+}
+
+//[[Rcpp::export]]
+arma::mat project_mat(arma::mat A, double C) {
+
+  int J = A.n_rows;
+  arma::mat PA = A;
+
+  for(int i = 0; i < J; ++i) {
+    PA.row(i) = project_vec(A.row(i), C);
+  }
+  return PA;
+}
+
+//[[Rcpp::export]]
+double lik_fn(const arma::mat& Theta,
+              const arma::mat& A,
+              double delta,
+              const arma::mat& Y,
+              const arma::mat& Omega) {
+
+  arma::mat temp = exp(delta + dist_partial(Theta, A));
+  arma::mat P = 2 / (1 + temp);
+  return accu(Omega % (Y % log(P) + (1 - Y) % log(1 - P)));
+}
+
+
+//[[Rcpp::export]]
+arma::mat dt_fn(const arma::mat& Theta,
+                const arma::mat& A,
+                double delta,
+                const arma::mat& Y,
+                const arma::mat& Omega) {
+
+  int J = A.n_rows;
+  int K = A.n_cols;
+
+  arma::mat temp = exp(delta + dist_partial(Theta, A));
+  arma::mat P = 2 / (1 + temp);
+  arma::mat Q = -4 * (Y / P - (1 - Y) / (1 - P)) % temp / square(1 + temp);
+  Q = Omega % Q;
+  arma::mat dt = (Q * ones<vec>(J) * ones<arma::rowvec>(K)) % Theta - Q * A;
+  dt = dt / (J * K);
+  return dt;
+
+}
+
+
+//[[Rcpp::export]]
+arma::mat da_fn(const arma::mat& Theta,
+                const arma::mat& A,
+                double delta,
+                const arma::mat& Y,
+                const arma::mat& Omega) {
+
+  int N = Theta.n_rows;
+  int K = Theta.n_cols;
+
+  arma::mat temp = exp(delta + dist_partial(Theta, A));
+  arma::mat P = 2 / (1 + temp);
+  arma::mat Q = -4 * (Y / P - (1 - Y) / (1 - P)) % temp / square(1 + temp);
+  Q = Omega % Q;
+  arma::mat da = (Q.t() * ones<vec>(N) * ones<arma::rowvec>(K)) % A - Q.t() * Theta;
+  da = da / (N * K);
+  return da;
+
+}
+
+
+//[[Rcpp::export]]
+arma::mat ut_fn(const arma::mat& Theta,
+                const arma::mat& A,
+                double delta,
+                const arma::mat& Y,
+                const arma::mat& Omega,
+                double M) {
+
+  arma::mat dt = dt_fn(Theta, A, delta, Y, Omega);
+  return project_mat(Theta + dt, M);
+
+}
+
+//[[Rcpp::export]]
+arma::mat ua_fn(const arma::mat& Theta,
+                const arma::mat& A,
+                double delta,
+                const arma::mat& Y,
+                const arma::mat& Omega,
+                double M) {
+
+  arma::mat da = da_fn(Theta, A, delta, Y, Omega);
+  return project_mat(A + da, M);
+
+}
+
+//[[Rcpp::export]]
+Rcpp::List opti_fn(arma::mat Theta,
+                   arma::mat A,
+                   double delta,
+                   const arma::mat& Y,
+                   const arma::mat& Omega,
+                   double M,
+                   double tol = 1) {
+
+  double l1 = lik_fn(Theta, A, delta, Y, Omega);
+  Theta = ut_fn(Theta, A, delta, Y, Omega, M);
+  A = ua_fn(Theta, A, delta, Y, Omega, M);
+  double l2 =  lik_fn(Theta, A, delta, Y, Omega);
+  // std::cout << l2;
+
+  while(l2 - l1 > tol) {
+
+    l1 = l2;
+    Theta = ut_fn(Theta, A, delta, Y, Omega, M);
+    A = ua_fn(Theta, A, delta, Y, Omega, M);
+    l2 = lik_fn(Theta, A, delta, Y, Omega);
+    // std::cout << l2;
+  }
+
+  return Rcpp::List::create(Rcpp::Named("Theta") = Theta,
+                            Rcpp::Named("A") = A);
+
+}
+

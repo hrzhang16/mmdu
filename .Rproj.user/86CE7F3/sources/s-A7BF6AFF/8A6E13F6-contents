@@ -1,0 +1,22 @@
+#' A subset of a benchmark MovieLens dataset
+#'
+#' This subset contains 943 users and 338 movies,
+#' obtained by selecting movies that have been rated by at least 100 users.
+#'
+#' The repsonses are rating behavior itself (i.e., rated/not rated).
+#'
+#' @format A list with 10 objects:
+#' \describe{
+#'   \item{data}{rating behavior (i.e., rated/not rated)}
+#'   \item{year_movie}{movie released year}
+#'   \item{num_movie}{number of rating for movies}
+#'   \item{rate_movie}{average ratings for movies}
+#'   \item{name_movie}{movie names}
+#'   \item{num_person}{number of rating for people}
+#'   \item{age_person}{age of people}
+#'   \item{gender_person}{gender of people}
+#'   \item{rate_person}{average ratings for people}
+#'   \item{job_person}{occupations of people}
+#' }
+#' @source \url{https://grouplens.org/datasets/movielens/100k/}
+"movielens"

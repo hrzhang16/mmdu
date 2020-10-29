@@ -1,0 +1,111 @@
+library(smacof)
+# library(munfold)
+
+setwd("~/Dropbox/MDS_Code/MovielensData/ml-100k")
+udata = read.csv("u.data", header = FALSE, sep = "")
+Y = matrix(0,943,1682)
+Omega = matrix(1,943,1682) 
+for(i in 1:943){Y[i,udata[(udata[,1] == i),2]] = 1}
+
+movie_select = which(apply(Y,2,sum)>=100)
+Y <- Y[,movie_select]
+Omega <- Omega[,movie_select]
+ 
+N = 943
+J = length(movie_select) 
+
+##############indices
+
+rate = vector();for(i in 1:1682){rate[i] = sum(udata[ (udata[,2]==i),3 ])/(length(udata[ (udata[,2]==i),  3 ]))}
+uitem = read.csv("u.item", header = FALSE, sep = "|")
+release_year = as.numeric(substr(as.character(uitem[,3]),8,11))
+release_month = match(substr(as.character(uitem[,3]),4,6),month.abb)
+release_date = as.numeric(substr(as.character(uitem[,3]),1,2))
+release_date[1373]=4
+release = release_year*365+release_month*30+release_date
+
+# the 267th movie are NA!
+
+num.movie_select = apply(Y,2,sum)
+user = read.csv("u.user", header = FALSE, sep = "|")
+
+day = (udata$V4/(3600*24)-10123)
+time_movie = rep(0,1682);for(i in 1:1682){time_movie[i] = median(  day[(udata[,2]==i)]  )}#/length(day[(udata[,2]==i)])}
+time_people = rep(0,943);for(i in 1:943){time_people[i] = median(  day[(udata[,1]==i)]  )}#/length(day[(udata[,1]==i)])}
+
+rate_select = rate[movie_select]
+uitem_select = uitem[movie_select,]
+release_select = release[movie_select]
+release_year_select = release_year[movie_select]
+type_select = list();for(i in 1:19){type_select[[i]] = which(uitem_select[,i+5]>=1)}
+job_name = names(table(user$V4));occupy = list(); for(i in 1:21){occupy[[i]] = which(user$V4 == job_name[i]) }
+time_movie_select = time_movie[movie_select]
+
+num.movie_col = rep(1,J)
+num.movie_col[which((num.movie_select>=100)&(num.movie_select<=quantile(num.movie_select,0.25)))] = 1
+num.movie_col[which((num.movie_select>quantile(num.movie_select,0.25))&(num.movie_select<=quantile(num.movie_select,0.5)))] = 2
+num.movie_col[which((num.movie_select>quantile(num.movie_select,0.5))&(num.movie_select<=quantile(num.movie_select,0.75)))] = 3
+num.movie_col[which(num.movie_select>quantile(num.movie_select,0.75))] = 4
+
+release_col = rep(1,J)
+release_col[which((release_year_select==1997)|(release_year_select==1998))] = 3
+release_col[which((release_year_select==1995)|(release_year_select==1996))] = 2
+release_col[which(release_year_select<=1994)] = 1
+
+num.persons_select = apply(Y,1,sum)
+
+num.persons_col = rep(1,N)
+num.persons_col[which(num.persons_select<=quantile(num.persons_select,0.25))] = 2
+num.persons_col[which((num.persons_select>quantile(num.persons_select,0.25))&(num.persons_select<=quantile(num.persons_select,0.5)))] = 3
+num.persons_col[which((num.persons_select>quantile(num.persons_select,0.5))&(num.persons_select<=quantile(num.persons_select,0.75)))] = 4
+num.persons_col[which(num.persons_select>quantile(num.persons_select,0.75))] = 5
+
+age_col = rep(1,N)
+age_col[which(user[,2]<=20)]=2
+
+gender_col = rep(1,N) 
+gender_col[which(user[,3]=="M")] = 2
+
+###======================================================
+Y_dis <- 1 - Y
+
+stress <- rep(0, 6)
+for (k in 2 : 6) {
+  a <- unfolding(Y_dis, ndim = k, type = "ordinal")
+  stress[k] <- a$stress
+}
+plot(stress)
+
+res <- unfolding(Y_dis, ndim = 2, type = "ordinal")
+plot(res, type = "p", pch = 25, col.columns = 3, 
+     label.conf.columns = list(label = TRUE, pos = 3, col = 3), 
+     col.rows = 8, label.conf.rows = list(label = TRUE, pos = 3, col = 8))
+
+Theta <- res$conf.row
+A <- res$conf.col
+
+pdf("~/Dropbox/MDS/MDU_JMLR/JMLR/revision1/figure/classical_movie_person.pdf", width = 5, height = 5)
+plot(Theta[,1],Theta[,2], col = grey(0.1),pch = 2,xlim = c(-1, 1.5), ylim = c(-2, 2), ann = FALSE)
+points(A[,1],A[,2],col = 2, pch = 1)
+legend("topright", c("movie","user"), col = c(2,1), pch = c(1,2), inset = 0.03)
+dev.off()
+
+# pdf("~/Dropbox/MDS/MDU_JMLR/JMLR/revision1/figure/classical_movie_screeplot.pdf", width = 5, height = 5)
+# plot(stress, type = "l", xlab = "Number of Dimensions")
+# points(stress, pch = 15)
+# dev.off()
+
+pdf("~/Dropbox/MDS/MDU_JMLR/JMLR/revision1/figure/classical_movie_time.pdf", width = 5, height = 5)
+plot(A[,1],A[,2],col = release_col, pch = release_col+3, xlim = c(-1.5, 1.5), ylim = c(-2, 2), ann = FALSE)
+legend("topleft", c("1997-1998","1995-1996","before 1995"), col = c(3,2,1), pch = c(6,5,4), inset = 0.03, cex = 0.75)
+dev.off()
+
+pdf("~/Dropbox/MDS/MDU_JMLR/JMLR/revision1/figure/classical_movie_number.pdf", width = 5, height = 5)
+plot(A[,1],A[,2],col = num.movie_col, pch = num.movie_col+3, xlim = c(-1.5, 1.5), ylim = c(-2, 2), ann = FALSE)
+legend("topleft",c("<=127","128-169","170-229",">=230"), col = c(1,2,3,4), pch = c(4,5,6,7), inset = 0.03, cex = 0.75)
+dev.off()
+
+pdf("~/Dropbox/MDS/MDU_JMLR/JMLR/revision1/figure/classical_person_number.pdf", width = 5, height = 5)
+plot(Theta[,1],Theta[,2],col = num.persons_col - 1, pch = num.persons_col+3, xlim = c(-1, 1.5), ylim = c(-1.5, 1.5), ann = FALSE)
+legend("topright",c("<=24","25-47","48-103",">=104"), col = c(1,2,3,4), pch = c(5,6,7,8), inset = 0.03, cex = 0.75)
+dev.off()

@@ -1,0 +1,168 @@
+setwd("~/Dropbox/MDS_Code/house_and_senate")
+library("stringi")
+library("stringr")
+
+us_senate = read.table("us_senate108.txt",sep = ",")
+data = as.character(us_senate$V1)
+data = data[-1]
+
+comm = vector()
+N = length(data)
+for(i in 1:N){
+  comm = c(comm,substr(data[[i]],21,21))
+}
+comm = strtoi(comm)
+comm_col = rep(0,N)
+comm_col[which(comm==1)] = 4
+comm_col[which(comm==2)] = 2
+comm_col[which((comm!=1)&(comm!=2))] = 3
+
+name = rep(0,100);for(i in 1:100){name[i] = substr(data[[i]],26,36)}
+state = rep(0,100);for(i in 1:100){state[i] = substr(data[[i]],13,20)}
+
+abbr_state = as.character(read.csv("~/Dropbox/MDS_Code/最新模型代码/senate/us_states.csv",header = FALSE)[,3])
+for(i in 1:100){state[i] = abbr_state[ceiling(i/2)]}
+
+data = strsplit(data, " ")
+
+reformat = list()
+for(i in 1:N){
+  ind = which(lapply(data[[i]],nchar)>200)
+  reformat = c(reformat,list(data[[i]][ind]))
+  temp = strtoi(strsplit(reformat[[i]],"")[[1]])
+  reformat[[i]] = temp
+}
+
+a = unlist(lapply(reformat,length))
+J = as.numeric(names(which.max(table(a))))
+
+for(i in 1:N){
+  reformat[[i]] = tail(reformat[[i]],J)
+}
+
+
+Y = matrix(unlist(reformat), ncol = J, byrow = TRUE)
+Omega = matrix(1,N,J)
+Omega[(Y==0) | (Y==7) | (Y==8) | (Y==9)] = 0
+
+Y[ (Y>=1) & (Y<=3) ] = 1
+Y[ (Y>=4) & (Y<=6) ] = 0
+
+
+
+
+#================================================
+Y[which(Omega == 0)] <- 1
+Y_dis <- 1 - Y
+
+# stress <- rep(0, 10)
+# for (k in 1 : 10) {
+#   a <- unfolding(Y_dis, ndim = k, type = "ordinal", weightmat = Omega)
+#   stress[k] <- a$stress
+# }
+# 
+# plot(stress)
+
+res <- unfolding(Y_dis, ndim = 2, type = "ordinal", weightmat = Omega)
+plot(res, type = "p", pch = 25, col.columns = 3, 
+     label.conf.columns = list(label = TRUE, pos = 3, col = 3), 
+     col.rows = 8, label.conf.rows = list(label = TRUE, pos = 3, col = 8))
+
+Theta <- res$conf.row
+A <- res$conf.col
+
+#================================================
+
+setwd("~/Dropbox/MDS_Code/house_and_senate")
+senate_bill = read.delim("senate_bill108.txt",header = F)
+
+bill = strsplit(as.character(senate_bill$V1), " ")
+
+reformat_bill = list();
+for(j in 1:J){
+  ind = which(lapply(bill[[j]],nchar)>=1)
+  reformat_bill = c(reformat_bill,list(bill[[j]][ind]))
+}
+
+Yea = apply(Y*Omega,2,sum)
+Nay = apply(Omega,2,sum) - Yea
+
+Yea_rep = apply((Y*Omega)[comm == 2,],2,sum)
+Yea_dem = Yea - Yea_rep - (Y*Omega)[comm==3,]
+Nay_rep = -apply(((Y-1)*Omega)[comm == 2,],2,sum)
+Nay_dem = Nay - Nay_rep + ((Y-1)*Omega)[comm==3,]
+
+vote = cbind(Yea_rep,Nay_rep,Yea_dem,Nay_dem)
+
+#what = Nay_dem+Yea_rep
+p_rep = rep(0,J);for(j in 1:J){p_rep[j] = length(which((Y[,j]==1)&(comm==2)))};p_rep = p_rep/length(which(comm==2))
+p_dem = rep(0,J);for(j in 1:J){p_dem[j] = length(which((Y[,j]==1)&(comm==1)))};p_dem = p_dem/length(which(comm==1))
+
+what = Yea_rep/Yea
+Col = rep(1,J)
+Col[(what>quantile(what,0.25))&(what<=quantile(what,0.5))] = 2
+Col[(what>quantile(what,0.5))&(what<=quantile(what,0.75))] = 3
+Col[what>quantile(what,0.75)] = 4
+
+#================================================
+p_1 = Yea_rep/(51)
+p_2 = Yea_dem/(48)
+p_3 = Nay_rep/(51)
+p_4 = Nay_dem/(48)
+p_5 = 1-p_1-p_3
+p_6 = 1-p_2-p_4
+
+a = -p_1*log(p_1)
+a[is.na(a)==1]=0
+b = -p_2*log(p_2)
+b[is.na(b)==1]=0
+c = -p_3*log(p_3)
+c[is.na(c)==1]=0
+d = -p_4*log(p_4)
+d[is.na(d)==1]=0
+e = -p_5*log(p_5)
+e[is.na(e)==1]=0
+f = -p_6*log(p_6)
+f[is.na(f)==1]=0
+
+entropy_rep = a+c+e
+entropy_dem = b+d+f
+what = rep(0,J);for(j in 1:J){what[j] = min(entropy_rep[j],entropy_dem[j])}
+
+group_1 = which(abs(A[,2])<=0.05)
+group_2 = which(abs(A[,2])>0.05)
+c = rep(1,J)
+c[group_2]=2
+
+#================================================
+
+
+pdf("~/Dropbox/MDS/MDU_JMLR/JMLR/revision1/figure/classical_voting_senator_bill.pdf", width = 7, height = 5)
+plot(A[,1], A[,2], pch = 2, xlim = c(-2, 2), ylim = c(-2, 3), ann = FALSE)
+points(Theta[,1], Theta[,2], col = 6)
+legend("topright",c("senator","roll call"),col = c(6,1),pch = c(1,2), inset = 0.03)
+dev.off()
+
+# pdf("~/Dropbox/MDS/MDU_JMLR/JMLR/revision1/figure/classical_voting_screeplot.pdf", width = 5, height = 5)
+# plot(stress, type = "l", xlab = "Number of Dimensions")
+# points(stress, pch = 15)
+# dev.off()
+
+pdf("~/Dropbox/MDS/MDU_JMLR/JMLR/revision1/figure/classical_voting_senator.pdf", width = 7, height = 5)
+plot(Theta[,1], Theta[,2], col = comm_col, pch = comm_col, xlim = c(-1.5, 1.5), ylim = c(-2, 2), ann = FALSE)
+legend("bottomright",c("Democrats", "Republican", "Independent"), col = c(4, 2, 3), pch = c(4, 2, 3), inset = 0.03)
+dev.off()
+
+pdf("~/Dropbox/MDS/MDU_JMLR/JMLR/revision1/figure/classical_voting_bill.pdf", width = 5, height = 5)
+plot(A[,1],A[,2],col = Col, pch = Col,xlim = c(-2, 2), ylim = c(-2, 3), ann = FALSE)
+# points(A[45,1],A[45,2],col =7,pch = 15)
+# points(A[13,1],A[13,2],col =7,pch = 15)
+# points(A[62,1],A[62,2],col =7,pch = 15)
+legend("topright", c("<0.068","0.068-0.52","0.52-0.73",">0.73"),col = c(1,2,3,4),pch = c(1,2,3,4), inset = 0.03)
+dev.off()
+
+pdf("~/Dropbox/MDS/MDU_JMLR/JMLR/revision1/figure/classical_voting_bill_box.pdf",width = 5, height = 5, useDingbats	= FALSE)
+boxplot(what~c)
+dev.off()
+
+name[which(Theta[,2] > 0.15)]
